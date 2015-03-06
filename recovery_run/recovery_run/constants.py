@@ -1,3 +1,4 @@
+import os
 cache_folder = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 which_hash = 'sha256'
 lw = 6
