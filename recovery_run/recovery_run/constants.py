@@ -1,4 +1,4 @@
-cache_folder = '/Users/fultonw/Documents/projects/runs/recovery_run/cache'
+cache_folder = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 which_hash = 'sha256'
 lw = 6
 curve_neg_lim = -2
