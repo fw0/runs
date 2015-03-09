@@ -1,5 +1,5 @@
 import os
-cache_folder = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+cache_folder = '%s/%s' % (os.path.dirname(os.path.dirname(os.path.realpath(__file__))), 'cache')
 which_hash = 'sha256'
 lw = 6
 curve_neg_lim = -2
