@@ -1,0 +1,887 @@
+\documentclass[8pt]{article}
+\usepackage[letterpaper, margin=0.66in]{geometry}
+\hyphenation{op-tical net-works semi-conduc-tor}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{breqn}
+\usepackage{mathtools}
+\usepackage[numbers]{natbib}
+\usepackage{subcaption}
+\usepackage{bbm}
+\newcommand{\tab}{\hspace*{2em}}
+\newcommand{\ignore}[1]{}
+\newcommand{\overbar}[1]{\mkern 1.0mu\overline{\mkern-1.0mu#1\mkern-1.0mu}\mkern 1.0mu}
+\begin{document}
+
+
+\section{Problem Statement}
+We aim to perform density ratio estimation: given samples from distributions $P_X^A(\cdot),P_X^B(\cdot)$, estimate \[w(x) := \frac{P_X^B(x)}{P_X^A(x)}.\]  We want to do this because suppose you have training data, which consists of $N^A$ samples $\{x^A_i,y^A_i\}$ drawn iid from the training distribution: $X^A_i,Y^A_i \sim  P_{X,Y}^A(\cdot) = P_X^A(\cdot) P_{Y|X}(\cdot)$.  You construct a predictive function $f(\cdot)$, and want to know the expected loss under the test distribution: $P_{X,Y}^B(\cdot) = P_X^B(\cdot) P_{Y|X}(\cdot)$.  An unbiased estimate of the expected test loss is 
+\begin{align}
+L(f,P_{X,Y}^B) = \sum_{i=1}^{N^A} w(x^A_i) L(y_i^A,f(x^A_i)),\label{eq:weighted_loss}
+\end{align}
+and so we need to find estimates $\hat{w}(x^A_i)$ of each $w(x^A_i)$, the true ratio at the covariates appearing in the training data.  Note the train and test distributions are assumed to differ only in the marginal distributions: $P_X^A(\cdot) \neq P_X^B(\cdot)$, but $P_{Y|X}^A(\cdot) = P_{Y|X}^B(\cdot)$.  This link between train/test distributions is called covariate shift.
+\section{Past Work in Density Ratio Estimation}
+\subsection{Ratio Matching Methods}
+\subsubsection{General Formulation}
+This section is mostly a summary of \cite{kanamori2010density}.  One line of work seeks to learn a function $\hat{w}(\cdot)$ minimizing $E_{X\sim P_X^A(\cdot)}[d_f(w(X),\hat{w}(X))]$, where $d_f(t,\hat{t}) := f(t) - (f(\hat{t}) + \nabla f(t-\hat{t}))$ is some Bregman divergence parameterized by $f$ that quantifies the distance between true ratios and estimated ratios:  
+\begin{align}
+E_{X\sim P_X^A(\cdot)}&[d_f(w(X),\hat{w}(X))] = E_{X\sim P_X^A(\cdot)}[f(w(X)) - f(\hat{w}(X)) - \nabla f(\hat{w}(X))(w(X)-\hat{w}(X))]\\
+&=-E_{X\sim P_X^A(\cdot)}[f(\hat{w}(X))] - E_{X\sim P_X^A(\cdot)}[\nabla f(\hat{w}(X))w(X)] + E_{X\sim P_X^A(\cdot)}[\nabla f(\hat{w}(X))\hat{w}(X)]\\
+&=-E_{X\sim P_X^A(\cdot)}[f(\hat{w}(X))] - E_{X\sim P_X^B(\cdot)}[\nabla f(\hat{w}(X))] + E_{X\sim P_X^A(\cdot)}[\nabla f(\hat{w}(X))\hat{w}(X)]
+\end{align}
+This expectation is unknown, but we can minimize
+over $\hat{w}(\cdot)$ an unbiased estimate, the empirical expectation:
+\begin{align}
+\hat{E}_{X\sim P_X^A(\cdot)}[d_f(w(X),\hat{w}(X))] &= -\tfrac{1}{N^A}\sum_i f(\hat{w}(x_i^A))] - \tfrac{1}{N^B}\sum_i\nabla f(\hat{w}(x_i^B))] + \tfrac{1}{N^B}\sum_i \nabla f(\hat{w}(x_i^A))\hat{w}(x_i^A)]\label{eq:empirical_obj}
+\end{align}
+This empirical expectation can be calculated because we have samples
+from both $P_X^A(\cdot)$ and $P_X^B(\cdot)$, and the expression does
+not depend on the known true ratio function $w(\cdot)$.
+
+% , and whether they are inductive (the entire function $w(\cdot)$
+% is learned) or transductive ($w(\cdot)$ is learned only at the $x$
+% appearing in Equation \ref{eq:weighted_loss}, namely the training
+% features $\{x_i^A\}$).  
+
+\subsubsection{Formulation with KL loss}
+Particular ratio matching methods differ on their choice of divergence
+$d_f$.  If $f(t)=t\log t - t$, then $\nabla f(t) =
+\log t$ and the quantity to be minimized is:
+\begin{align}
+\hat{E}_{X\sim P_X^A(\cdot)}[d_f(w(X),\hat{w}(X))] &=\tfrac{1}{N^A}\sum_i\hat{w}(x_i^A) - \tfrac{1}{N^B}\sum_i\log \hat{w}(x_i^B)\label{eq:kl_obj}
+\end{align}
+Furthermore, $E_{X\sim P_X^A(\cdot)}[w(X)]=\int_x
+P_X^A(x)\tfrac{P_X^B(x)}{P_X^A(x)}dx = \int_x P_X^B(x)dx=1$, and thus
+$\hat{w}(x)$ should satisfy the empirical version of this constraint:
+$\tfrac{1}{N^B}\sum_i \hat{w}(x_i^B)=1$.  Combining the objective
+function of Equation \ref{eq:kl_obj} 
+with this constraint and a
+non-negativity constraint on the weight ratios gives the following
+problem:
+\begin{align}
+\min_{\{\hat{w}(x_i^B)\}_{i=1}^{N^B}}  - \tfrac{1}{N^B}\sum_i\log
+\hat{w}(x_i^B) \ \ \text{subject to}\\
+\tfrac{1}{N^B}\sum_i \hat{w}(x_i^B)=1\\
+\hat{w}(x_i^B) > 0
+\end{align}
+Note that this minimization only gives the length $N^B$ vector of ratios at the \emph{test}
+points $\{x_i^B\}$, whereas in Equation \ref{eq:weighted_loss}, one
+needs the ratios at the \emph{training} points $\{x_i^A\}$, which are
+not available, because in the current formulation, we are not
+estimating the \emph{entire} function $\hat{w}(\cdot)$, but rather
+just it's value at the finite set of testing points.  To obtain the
+ratios at the training points, we need to learn the entire function
+$w(\cdot)$.  One approach would be to pre-specify a set of $K$ basis
+functions $\{\phi_k(\cdot)\}$ and assume 
+\begin{align}
+\hat{w}(\cdot) = \sum_k\alpha_k \phi_k(\cdot). \label{eq:basis}
+\end{align} 
+The optimization problem is then to learn the weights
+parameterizing the ratio function:
+\begin{align}
+\min_{\{\alpha_k\}}  - \tfrac{1}{N^B}\sum_i\log \sum_k
+\alpha_k\phi_k(x_i^B)\label{eq:kl_obj} \ \ \text{subject to}\\
+\tfrac{1}{N^B}\sum_i \sum_k \alpha_k\phi_k(x_i^B)=1\\
+\alpha_k \geq 0
+\end{align}
+This is a convex problem that scales with the number of basis functions, not
+the number of data points.
+
+\subsubsection{Formulation with squared loss}
+We can also consider the ratio matching method if the $f$
+parameterizing the divergence $d_f$
+is chosen to be $f(t) = \tfrac{1}{2}t^2$.  Then, $\nabla f(t) =
+t$, and according to Equation \ref{eq:empirical_obj}, the objective
+to be minimized is:
+\begin{align}
+\hat{E}_{X\sim P_X^A(\cdot)}[d_f(w(X),\hat{w}(X))] &=\tfrac{1}{2N^A}\sum_i\hat{w}(x_i^A)^2 - \tfrac{1}{N^B}\sum_i \hat{w}(x_i^B)\label{eq:sq_obj}
+\end{align}
+Assuming the basis representation of Equation \ref{eq:basis}, and
+using the notation $\phi(x) := (\phi_1(x),\dots,\phi_K(x))^\prime$ and
+$\alpha := (\alpha_1,\dots,\alpha_K)$, the optimization problem
+becomes:
+\begin{align}
+\min_\alpha \tfrac{1}{2}\alpha^\prime
+\Big(\tfrac{1}{N^A}\sum_i\phi(x_i^A)\phi(x_i^A)^\prime\Big) \alpha
+- \Big(\tfrac{1}{N^B}\sum_i
+\phi(x_i^B)\Big)^\prime\alpha\label{eq:sq_obj}\ \ \text{subject to}\\
+\alpha \geq 0
+\end{align}
+Thus the squared loss formulation leads to a quadratic program which
+should be able to be solved more easily than the KL formulation
+(though both are convex).  Regularization on the basis function coefficients $\alpha$ can be
+added in both the formulations.  Under the lasso loss for $\alpha$
+with penalty $\lambda$, the squared loss
+formulation has the advantage that the optimal
+$\alpha$ is piecewise linear as a function of $\lambda$, so that the
+optimal $\alpha$ for all possible $\lambda$ can be enumerated, and model
+selection can be performed efficiently.
+
+\subsubsection{Cross-validation}
+One of the advantages of ratio matching methods is that cross
+validation can be used to choose the hyperparameters, 
+$\{\phi_k(\cdot)\}$ and $\lambda$, governing the
+ratio-learning procedure.  Cross validation is possible firstly because the
+learning procedure is \emph{inductive}: an entire ratio function is
+learned using a training set, so that weight estimates can be obtained
+for a \emph{separate} test set.  Secondly, the quality of these test
+set weight estimates can be evaluated \emph{directly}.  As we shall
+see, neither of these is possible with kernel mean matching.
+
+Both the ratio-learning procedure and the weight estimate evaluation
+step require samples from both $P_X^A(\cdot)$ and $P_X^B(\cdot)$.
+Thus, to evaluate the out-of-sample performance of a given
+hyperparameter setting, one can divide the data into $k$
+folds, where each fold contains samples from both $P_X^A(\cdot)$ and
+$P_X^B(\cdot)$, and repeatedly evaluate the ratio estimates on 1 fold
+obtained from the ratio function learned from the remaining folds.
+
+\subsubsection{Formulation with dimension reduction}\label{sec:dim_reduction}
+Density ratio estimation is hard in high dimensions, and the
+aforementioned methods have been adapted to project $X$ into a lower
+dimensional subspace (spanned by the
+columns of) $U \in
+\mathbb{R}^{D\times d}$, and estimate the ratio of the projected
+distributions.  The key is then to decide what $U$
+should be.
+
+To elaborate, let $V=U^\perp$, and let (overloading notation) $U(\cdot),V(\cdot)$ denote
+projection functions onto the subspaces $U,V$.  Note that one can write $x$ uniquely as $x=U(x) +
+V(x)$.  $P_X^A(\cdot)$ then can
+be written as $P_X^A(x) =
+P_{U(X)}^A(U(x))P_{V(X)|U(X)}^A(V(x))$,
+and similarly for $P_X^B(\cdot).$  Under the assumption
+\begin{align}
+P_{V(X)|U(X)}^A(\cdot)&=P_{V(X)|U(X)}^B(\cdot),\ \ \text{then}\\
+w(x) &=
+\frac{P_{U(X)}^B(U(x))P_{V(X)|U(X)}^B(V(x))}{P_{U(X)}^A(U(x))P_{V(X)|U(X)}^A(V(x))}
+=
+\frac{P_{U(X)}^B(U(x))}{P_{U(X)}^A(U(x))}
+:= w_{U(\cdot)}(U(x)),\label{eq:projected_ratio}
+\end{align}
+%where we use $U$ to refer to the random variable $\operatorname{Proj}_U(X)$
+%and 
+where $w_{U(\cdot)}(\cdot)$ is defined to be the ratio of the
+projected densities. 
+
+The goal is then to find the (smallest) subspace $U$ such that
+$P_{U(X)}^A(\cdot) \neq P_{U(\cdot)}^B(\cdot)$.  In practice, $d$ is fixed
+beforehand, and a search for the $d$-dimensional subspace $U$
+maximizing some dissimilarity measure between $P_{U(\cdot)}^A(\cdot)$ and
+$P_{U(\cdot)}^B(\cdot)$ is sought.  One approach is to view samples from the 2
+distributions as belonging to different classes, and apply linear
+discriminant analysis to find a subspace maximizing the ratio of
+total between-class distance over total within-class distances.
+Another disimilarity is Pearson Divergence
+(PD):
+\begin{align}
+  PD(P_{U(X)}^A(\cdot),P_{U(X)}^B(\cdot)) = E_{U(X) \sim P_{U(X)}^A(\cdot)}\Big[(\tfrac{P_{U(X)}^B(U(X))}{P_{U(X)}^A(U(X))}-1)^2\Big]\label{eq:pearson_div}
+\end{align}
+
+
+% Ratio-matching methods learn, via the aforementioned training procedures, a function $\hat{w}(\cdot)$
+% aiming to minimize expected loss $E_{X\sim
+%   P_X^A(\cdot)}[d_f(w(X),\hat{w}(X))]$, which measures the quality of
+% the estimated ratio function.  Note that an
+% estimate of this quantity is obtained via Equation
+% \ref{eq:empirical_obj}, which requires samples from both
+% $P_X^A(\cdot)$ and $P_X^B(\cdot)$.
+% The training procedure is
+% governed by the following hyperparameters: the set of basis functions
+% $\{\phi_k(\cdot)\}$ and regularization penalty $\lambda$, and likewise requires samples from both
+% $P_X^A(\cdot)$ and $P_X^B(\cdot)$.
+
+% Estimating the expected loss under the $\hat{w}(\cdot)$ from a
+% training procedure governed by a given choice of hyperparameters thus
+% requires a training set and test set both of which contain samples
+% from $P_X^A(\cdot)$ and $P_X^B(\cdot)$ - the former is used to learn a
+% $\hat{w}(\cdot)$, and the latter is used to estimate the expected
+% loss.  Evaluating a given choice of hyperparameters thus can be
+% accomplished using cross-validation, where all training and test folds
+% contain samples
+% from $P_X^A(\cdot)$ and $P_X^B(\cdot)$.
+  
+% One of the advantages of
+% ratio-matching methods is that cross-validation can actually be done
+% for hyperparameter selection.  Firstly, weight ratio estimates can actually be obtained
+% for out-of-sample $x$ (i.e. the $x$ in the test data) and secondly,
+% the quality of such out-of-sample weight ratios estimates can be
+% evaluated.  As we shall see, neither is possible with kernel mean
+% matching, because it does not learn an entire function
+% $\hat{w}(\cdot)$ so that ratio estimates are not available for test
+% data.  Furthermore, even if such inductive estimates were available, the
+% objective function evaluating them does not measure their quality directly, but instead does so indirectly through the difference in
+% moments of distributions weighted by those ratio estimates.
+
+
+% An
+% estimate of this quantity is obtained via Equation
+% \ref{eq:empirical_obj}, which requires samples from both
+% $P_X^A(\cdot)$ and $P_X^B(\cdot)$, as does the training procedure that
+% learns $\hat{w}(\cdot)$.  The hyperparameters governing the training
+% procedure are, in this setting, the choice of basis functions
+% $\{\phi_k(\cdot)\}$ and regularization penalty $\lambda$.
+
+\subsection{Kernel Mean Matching}
+\subsubsection{Formulation}
+KMM \cite{huang2006correcting} is motivated by the following theorem: let $\phi:\mathcal{X}
+\rightarrow \mathcal{F}$ be a feature map on covariate $x \in
+\mathcal{X}$, such that the induced kernel $k: \mathcal{X} \times
+\mathcal{X} \rightarrow \mathbb{R}$ is ``universal''.  Given
+distributions $P_A^X(\cdot),P_B^X(\cdot)$, the solution to the
+following optimization problem is the function $w(\cdot):x \rightarrow
+\tfrac{P_X^B(x)} {P_X^A(x)}:$
+\begin{align}
+\min_{w(\cdot)}\big\lvert E_{X\sim P_X^B(\cdot)}[\phi(X)] - E_{X \sim
+  P_X^A(\cdot)}[w(X)\phi(X)]\big\lvert \ \ \text{subject to} \label{eq:kmm_true_loss}\\
+w(x) \geq 0\\
+E_{X\sim P_X^A(\cdot)}[w(x)] = 1
+\end{align}
+
+In practice, we have samples $x_i^A\sim P_X^A(\cdot)$,
+$x_i^B\sim P_X^B(\cdot)$, and 
+minimize empirical loss to get estimate $\hat{w}(\cdot)$:
+\begin{align}
+\min_{B(\cdot)}\big\lvert \tfrac{1}{N^B}\sum_i \phi(x_i^B) -
+\tfrac{1}{N^A}\sum_i w(x_i^A)\phi(x_i^A)\big\lvert \ \ \text{subject
+  to} \label{eq:kmm_empirical_loss}\\
+w(x_i^A) &\in [0,W_{\max}] \\
+|\tfrac{1}{N^A}\sum_i w(x_i^A)]| &\leq 1 - \epsilon
+\end{align}
+
+One
+can provide probabilistic bounds on the suboptimality of estimated
+$\hat{w}(\cdot)$ under the true loss of Equation
+\ref{eq:kmm_true_loss}.  These bounds depend on upper bound $W_{\max}$
+such that $w(x) \leq W_{\max}$, which is unknown, but assumed in the
+optimization.  Furthermore, for the true $w(\cdot)$, the empirical expectation
+$|\tfrac{1}{N^A}\sum_i w(x_i^A)]|$ will differ from its true
+expectation of $1$, and so in trying to find that true $w(\cdot)$, we
+allow the empirical expectation some deviation error.
+
+\subsubsection{Drawbacks}
+Although the optimization of Equation \ref{eq:kmm_empirical_loss} is
+technically over the space of ratio functions, returning an
+estimated $\hat{w}(\cdot)$, we only actually have
+access to the ratio for the samples from $P_X^A(\cdot)$:
+$\{\hat{w}(x_i^A)\}$.  Thus the ratio learning procedure is not
+\emph{inductive}, and we cannot estimate ratios for a separate
+validation set, and thus do not have a way to evaluate out-of-sample
+ratio estimation performance.  This means there is no clear way to
+perform cross validation to choose the hyperparameters of the ratio
+learning procedure: $\phi(\cdot),W_{\max},\epsilon$.  Furthermore,
+even if out-of-sample ratio estimates are available, the difference in
+feature means objective function is not directly minimizing accuracy
+of ratios, so perhaps ``performance'' on a validation would not be
+measuring the right thing anyways.  Though, there are bounds showing that achieving small difference in (weighted)
+feature means (Equation \ref{eq:kmm_empirical_loss}) implies the loss
+on the reweighted training set is close with high probability to the
+actual loss on the test set.
+\subsection{Classifier-based methods}
+\subsubsection{Standalone Approaches}
+With classifier methods, we assume a joint distribution over $Z,X$.
+$Z$ is Bernoulli - if $Z=1$, $X$ is drawn from $P_X^B(\cdot)$.
+Otherwise, $X$ is drawn from $P_X^A(\cdot)$.  Once $P_{Z,X}(\cdot)$ is
+learned, 
+\begin{align}
+w(x) = \frac{P_X^B(x)}{P_X^A(x)} = \frac{P_{X|Z}(x|z=1)
+}{P_{X|Z}(x|z=0) } =
+\frac{\tfrac{P_{Z|X}(z=1|x)P_X(x)}{P_Z(z=1)}}{\tfrac{P_{Z|X}(z=0|x)P_X(x)}{P_Z(z=0)}}
+= \frac{P_{Z|X}(z=1|x)}{P_{Z|X}(z=0|x)} \frac{P_Z(z=0)}{P_Z(z=1)}\label{eq:classifier_ratio}
+\end{align}
+$P_Z(\cdot)$ is estimated simply as $P_Z(z=1) =
+\tfrac{N^B}{N^A+N^B}$.  $P_{Z|X}(\cdot)$ can be learned using
+\emph{any} classifier, by labeling samples with $Z=1$ if they came
+from $P_X^B(\cdot)$, else $Z=0$.  This approach is equivalent
+to propensity scores.
+%Past work has used logistic
+%regression and deep neural nets, among others.  
+%Note that
+%$P_{Z|X}(\cdot)$ is exactly the propensity score, and that propensity
+%score estimation is equivalent to density ratio estimation, as
+%estimating one quantity gives you the other.  This means other density
+%ratio methods can be used in causal inference, in addition to the
+%classifier based methods statisticians currently use.
+
+\subsubsection{Joint Approaches}\label{sec:joint}
+So far, the task of learning a predictive model for the test
+distribution $P_X^B(\cdot)$ has proceeded in 2 steps: 
+\begin{enumerate}
+\setlength\itemsep{0em}
+\item Given training
+and test samples $\{x_i^A\},\{x_i^B\}$, estimate the weight ratio
+function: \\find
+$w^*(\cdot) = \operatorname{argmin}_{w(\cdot)}L_w(w(\cdot);\{x_i^A\},\{x_i^B\})$,
+where $L_w$ is some loss function measuring how well weight function
+$w(\cdot)$ estimates the ratios, for example Equation \ref{eq:empirical_obj}.
+\item Learn a predictive model $f^*(\cdot)$ minimizing (estimated) test-set loss:\\ find $f^*(\cdot)=\operatorname{argmin}_{f(\cdot)} \sum_i w^*(x_i^A)
+  L_f(f(x_i^A),y_i^a)$, using
+  training set covariates $x_i^A$ and labels $y_i^A$, where $L_f$ is per-sample predictive
+  loss, e.g. squared or logistic loss.
+\end{enumerate}
+\cite{bickel2007discriminative} propose to solve these 2 optimization
+problems jointly: that is, find:
+\begin{align}
+\operatorname{argmin}_{w(\cdot),f(\cdot)}
+L_w(w(\cdot);\{x_i^A\},\{x_i^B\}) + \sum_i w(x_i^A)
+  L_f(f(x_i^A),y_i^a) \label{eq:joint_bickel}
+\end{align}
+They assume the predictive task to be classification, and assume
+$f(\cdot)$ to be a logistic regression classifier, with
+$L_f(\cdot,\cdot)$ thus being logistic loss.  They assume $w(\cdot)$
+to be of the form of Equation \ref{eq:classifier_ratio}, with $P_{Z|X}(\cdot)$
+modelled by another logistic regression.  $w(\cdot)$ appears in both
+terms, so that the joint optimization is different from the sequential
+optimization.  $w(\cdot)$ is the information shared between the 2 tasks.
+
+There are some drawbacks: their method is only applicable when the
+prediction task is classification, due to the assumption of $f(\cdot)$
+being a logistic regression.  Secondly, it may be sufficient to
+estimate $w_{U(\cdot)}(\cdot)$ for some subspace/projection $U$, for
+example, if 
+%$f(X)\perp X | U(X)$ (e.g. if
+%$f(x_1)=f(x_2)$ if $U(x_1)=U(x_2)$) and 
+$Y\perp X | U(X)$ where $X,Y
+\sim P_{X,Y}^B(\cdot)$.  Intuitively, the prediction task (which
+requires weight estimates)
+contains information of what $U$ might be, which can then be used to
+refine the weight estimates that the prediction task depended on in
+the first place.  Thus, $U$ should be shared between the tasks.
+
+\section{Past Dependency Measures}
+This work will perform ratio estimation of projected
+densities into a subspace $U$ that is ``useful'' for prediction as measured by some
+dependence measure between $U(X)$ and $Y$. We review some candidate measures.
+\subsection{$f$-Divergence Based Measures}
+Given a joint distribution $P_{X,Y}(\cdot,\cdot)$ this class of dependency measure
+quantifies the dependence between $X$ and $Y$ to be the $f$-divergence between $P_{X,Y}(\cdot,\cdot)$ and
+$P_X(\cdot)P_Y(\cdot)$, where $P_X,P_Y$ are the
+marginals of $P_{X,Y}$.  
+
+\subsubsection{Definitions}
+Given convex function $f:\mathbb{R}\rightarrow\mathbb{R}$, distributions
+$p(\cdot),q(\cdot)$, the \emph{$f$-divergence} between $p,q$ is defined to
+be:
+\begin{align}
+D_f(p||q) = \int_x f(\tfrac{p(x)}{q(x)})p(x)dx
+\end{align}
+The $f$-divergence generalizes the KL-divergence.  Indeed, suppose
+$f=KL$ where 
+\begin{align}
+KL(u) = 
+\begin{cases}
+-\log(u)\ \text{if}\ u > 0\\
++\infty\ \text{otherwise.}
+\end{cases}\ 
+\shortintertext{Then}
+D_{KL}(p||q) = E_{X\sim p}[-\log
+\tfrac{p(X)}{q(X)}].
+\end{align}
+Given $f$, the corresponding \emph{$f$-information} between $X$ and $Y$ in
+the joint distribution $P_{XY}$ is
+defined to be:
+\begin{align}
+  I_f(X,Y) = D_f(P_XP_Y||P_{XY})
+\end{align}
+where $P_X,P_Y$ are the marginals of $P_{XY}$.  Note that $I_{KL}(X,Y)$ is
+simply the mutual information between $X$ and $Y$, and that all the below
+statements about $D_f(p||q)$ hold for $I_f(X,Y)$, with $p\leftarrow P_XP_Y$ and $q\leftarrow P_{XY}$.
+
+\subsubsection{Variational Characterization of $f$-Divergence}
+A variational characterization of $D_f(p||q)$ motivates optimization
+based lower bound approximations:
+\begin{align}
+D_f(p||q) = \sup_g E_{X\sim q}[g(X)] - E_{X \sim
+  p}[f^*(g(X))] \label{eq:f_div_variational}
+\end{align}
+where $f^*$ denotes the convex conjugate of $f$ and the $\sup$ is over
+all functions $g:\mathcal{X}\rightarrow \mathbb{R}$.
+
+Furthermore, it can shown that \cite{nguyen2007estimating} if $g$ attains the $\sup$, then 
+\begin{align}
+g(x) \in \delta f(\tfrac{p(x)}{q(x)})\ \ \text{for all}\ x. \label{eq:f_div_argmax}
+\end{align}
+For example, in the case of KL-divergence,
+$f^*(v) = -1 - \log(-v)$ for $v<0$ and $+\infty$ for
+$v \geq 0$.  Then,%by Equations \ref{eq:f_div_variational} and
+%\ref{eq:f_div_argmax},
+\begin{align}
+D_{KL}(p||q) &= \sup_{g < 0}E_{X\sim q}[g(X)] - E_{X\sim p}[-1 -
+\log(-g(X))] \\&= \sup_{g > 0} E_{X\sim p}[\log g(X)] - E_{X\sim
+q}[g(X)] + 1 \label{eq:KL_div}\\
+g_{KL}(x) &= \tfrac{q(x)}{p(x)}\label{eq:KL_div_argmax}
+\end{align}
+Thus, evaluating $D_f(p||q)$ via the variational approach of Equation
+\ref{eq:f_div_variational} gives not only $D_f(p||q)$, but also a
+function with a 1-to-1 correspondence with density ratio function
+$\tfrac{p(x)}{q(x)}$ (the reciprocal
+function $\tfrac{q(x)}{p(x)}$, in the case of KL-divergence).  This is like how in the variational characterization
+of a Bayesian model's evidence, we get not only (a lower bound on)
+the evidence, but also the posterior density function over latent
+variables.
+
+\subsubsection{Estimation of $f$-Divergences}
+Given $N^p$ samples
+$x_i^p \sim p$, $N^q$ samples $x_i^q\sim q$, the empirical estimation of $D_f(p||q)$ solves the optimization of Equation
+\ref{eq:f_div_variational} but with 2 approximations: empirical
+expectations replace true expectations, and 
+the $\sup$ is restricted to be over a chosen function class $\mathcal{G}$, by choosing a set of $K$ basis
+functions $\{\phi_k(\cdot)\}$ and letting 
+\begin{align}
+\mathcal{G} = \{g(\cdot):x\rightarrow  \langle\alpha, \Phi(x)\rangle; \alpha \in \mathbb{R}^K\}\label{eq:f_div_basis}
+\end{align}
+where $\Phi(x)=(\phi_1(x),\dots,\phi_K(x))$.
+For example, assuming $\phi_k(\cdot)>0$, estimation of $D_{KL}(p||q)$,
+combining Equation
+\ref{eq:KL_div} and \ref{eq:f_div_basis}, becomes:
+\begin{align}
+\tilde{D}_{KL}(p||q) &= \max_{\alpha \geq 0}\tfrac{1}{N^p}\sum_i \log
+\langle\alpha,\Phi(x_i^p)\rangle - \tfrac{1}{N^q} \sum_i \langle\alpha,
+\Phi(x_i^q)\rangle + 1,\ \text{with, based on Equation
+  \ref{eq:KL_div_argmax}} \label{eq:KL_div_est}\\
+\hat{g}_{KL}(x) &=\langle\hat{\alpha},\Phi(x)\rangle \approx \tfrac{p(x)}{q(x)}
+\end{align}
+being an estimate of density ratio function $\tfrac{p(x)}{q(x)}$,
+where $\hat{\alpha}$ is the $\operatorname{argmax}$ of Equation
+\ref{eq:KL_div_est}.
+
+Another interesting choice of $f$ due to the tractability of
+calculating the corresponding $D_f$ is when $f=SQ$, where
+\begin{align}
+SQ(u) = 
+\begin{cases}
+\tfrac{1}{2}(u-1)^2\ \text{if}\ u>0\\
++\infty\ \text{otherwise.}
+\end{cases}
+\end{align}
+$D_{SQ}$ is the \emph{Pearson Divergence}.  Furthermore, letting
+$\overbar{SQ}(u)=\tfrac{1}{2}u^2$ if $u>0$, $+\infty$ otherwise, the following
+identity follows from Equation \ref{eq:f_div_variational}:
+\begin{align}
+D_{SQ}(p||q) = D_{\overbar{SQ}}(p||q) - \tfrac{1}{2} \label{eq:sq_identity}
+\end{align}
+Thus to estimate $D_{SQ}(p||q)$, it suffices to
+estimate $D_{\overbar{SQ}}(p||q)$, which is computationally more tractable.
+In this case, $f^*(v) = \overbar{SQ}^*(v)=\tfrac{1}{2}v^2$ for $v\geq 0$ and
+$0$ for $v< 0$.  Then, according to Equation
+\ref{eq:f_div_variational} and \ref{eq:f_div_argmax}:
+\begin{align}
+D_{\overbar{SQ}}(p||q) &= \sup_{g} E_{X\sim q}[g(X)] - E_{X\sim
+  p}[\max(\tfrac{1}{2}g(X)^2,0)]\\
+&= \sup_{g\geq 0} E_{X\sim q}[g(X)] - E_{X\sim
+  p}[\tfrac{1}{2}g(X)^2]\label{eq:sq_div_opt}\\
+g_{\overbar{SQ}}(x) &= \tfrac{p(x)}{q(x)}\label{eq:sq_div_g}
+\end{align}
+Assuming $\mathcal{G}$ to be as in Equation
+\ref{eq:f_div_basis}, the empirical optimization of Equation
+\ref{eq:sq_div_opt} can be written as a constrained quadratic program:
+\begin{align}
+\hat{D}_{\overbar{SQ}}(p||q)& = \max_{\alpha \geq 0}-\tfrac{1}{2}\alpha^T\Big(\tfrac{1}{N^p}\sum_i
+\Phi(x_i^p)\Phi(x_i^p)^T\Big)\alpha +
+\Big(\tfrac{1}{N^q}\sum_i\Phi(x_i^q)\Big)^T\alpha,\ \text{with, based
+  on Equation \ref{eq:sq_div_g}}\label{eq:sq_div_estimation}\\
+\hat{g}_{\overbar{SQ}}(x)&=\langle \hat{\alpha},\Phi(x)\rangle \approx \tfrac{p(x)}{q(x)}
+\end{align}
+%an estimate of density ratio function $\tfrac{q(x)}{p(x)}$.
+\subsubsection{Estimation of Dependency Measures based on
+  $f$-Divergences}
+Given $N$ samples $\{x_i,y_i\}$ drawn iid from $
+P_{XY}$, we can regard $\{(x_i,y_j): 1\leq i,j \leq N\}$ to be $N^2$
+samples drawn iid from $P_XP_Y$.  To perform empirical estimation of
+$I_f(X,Y)$, like before we define $\mathcal{G}$, a class of functions whose domain is
+$\mathcal{X}\times\mathcal{Y}$, as this is the support of $P_{XY}$ and
+$P_XP_Y$, specifying $K$ basis functions $\{\phi_k(\cdot)\}$
+and letting:
+\begin{align}
+\mathcal{G} = \{g(\cdot):(x,y)\rightarrow  \langle\alpha, \Phi(x,y)\rangle; \alpha \in \mathbb{R}^K\}\label{eq:I_f_basis}
+\end{align}
+where $\Phi(x,y)=(\phi_1(x,y),\dots,\phi_K(x,y))$.  Then, empirical estimation of $I_f(X,Y)$
+becomes:
+\begin{align}
+\hat{I}_f(X,Y) = \sup_{g\in\mathcal{G}}\tfrac{1}{N} \sum_i g(x_i,y_i)
+- \tfrac{1}{N^2} \sum_{i,j}f^*(g(x_i,y_j))
+\end{align}
+For example, the empirical estimation of $I_{f}(X,Y)$ for $f=SQ$
+becomes (using the identity of Equation \ref{eq:sq_identity}):
+\begin{align}
+\hat{I}_{SQ}(X,Y) &= \hat{I}_{\overbar{SQ}}(X,Y) - \tfrac{1}{2},\ \text{where}\\
+\hat{I}_{\overbar{SQ}}(X,Y)&=\max_{\alpha\geq 0}-\tfrac{1}{2}\alpha^T\Big(\tfrac{1}{N^2}\sum_{i,j}
+\Phi(x_i,y_j)\Phi(x_i,y_j)^T\Big)\alpha+\Big(\tfrac{1}{N}\sum_i\Phi(x_i,y_i)\Big)^T\alpha,\
+\text{with}\\
+\hat{g}_{I_{\overbar{SQ}}}(x,y)&=\langle \hat{\alpha},\Phi(x,y)\rangle \approx \tfrac{P_{XY}(x,y)}{P_X(x)P_Y(x)}
+\end{align}
+%an estimate of $\tfrac{P_{XY}(x,y)}{P_X(x)P_Y(x)}.$
+Note that $I_{SQ}$ is the \emph{squared mutual information} defined in \cite{suzuki2013sufficient}.
+
+\section{Proposed Work}
+
+I propose to perform density ratio estimation following the dimension reduction approach of Section
+\ref{sec:dim_reduction}, estimating density ratios of the projection
+of the test and training covariate distributions into some subspace
+$U$.  Unlike past work, we consider a \emph{supervised} setting, where
+we assume the end goal is to perform instance re-weighting for domain
+adaptation of some supervised task.  Thus, we will choose $U$ to
+maximize some general measure of predictive ``utility'' for the test distribution
+that can be computed using projected test samples $\{U(x_i^B),y_i\}$.
+The justification is that if $U$ has high predictive utility for the
+test distribution, then one can project the features onto $U$ before
+learning a predictor, following the more general approach of
+dimensionality reduction to improve robustness.  In this situation,
+instance re-weighting using Equation \ref{eq:weighted_loss} using the
+ratio of the \emph{projected} densities is sufficient for obtaining an
+unbiased estimate of test loss.  The benefit of dimension
+reduction in this pipeline is then two-fold: to improve the robustness
+of both the
+learning method and the ratio estimates.  In fact, we can even rebrand
+the primary goal to be supervised dimension reduction under covariate shift.
+
+% the practical significance
+
+% The work I propose is to follow the dimension reduction approach of Section
+% \ref{sec:dim_reduction}, estimating density ratios of the projection
+% of the test and training covariate distributions into some subspace
+% $U$.  However, I will assume that the estimated density ratios will be
+% used in a \emph{supervised} setting with covariate shift - to estimate the loss of some
+% predictor $f$ under \emph{test} distribution $P_{X,Y}^B(\cdot)$.  Thus,
+% $U$ will be a subspace of covariate space that is ``sufficient'' for
+% achieving low test loss.  That is, the
+% expected test loss of a predictive method learned using
+% iid samples $\{x_i^B,y_i^B\} \sim P_{X,Y}^B(\cdot)$ does not suffer if
+% instead learned using projected samples $\{U(x_i^B),y_i^B\}$.  The
+% practical significance of the learned $U$ is that to learn a predictor under
+% covariate shift, one can first project the training set feature onto
+% $U$, and then search for a predictor minimizing test loss, where the
+% density ratios used to estimate of test loss only need to be
+% calculated for the distributions projected onto $U$.
+%Put
+%another way, it would be reasonable to project the test covariates
+%onto $U$ and then learn a predictor using the test labels and projected covariates.
+
+The problem of course that we
+cannot directly compute the predictive utility measure of $U$ for the test
+distribution based on
+projected test samples $\{U(x_i^B),y_i^B\}$, as we lack test
+labels. Though, we can obtain an
+estimate that will require weight ratios that under the dimension reduction approach, require $U$ to begin with.
+Thus, finding $U$ and estimating the ratios of the densities
+projected onto $U$ \emph{cannot} be performed sequentially.  Instead, $U$ and
+the projected ratios must be found jointly
+so that the projected ratios are well estimated, and the predictive
+test utility of $U$ (relying on the projected ratios)
+is also high.
+
+Certainly, the predictive utility of a projection is affected by the
+change in
+marginal covariate distribution that occurs in covariate shift, so
+that the projection with the highest predictive utility for the
+training distribution is not necessarily that for the test
+distribution.  This is why a naive approach of performing supervised
+dimension reduction for the training data followed by instance
+reweighting using projected ratios and (possibly cost-sensitive)
+training to learn a predictor cannot be expected to give low test
+loss.  We illustrate with an example.
+
+\subsection{Proposed Work}
+For this project, I propose to do supervised dimension reduction under
+covariate shift.  That is, given sample features and labels from the
+training distribution, and sample features (but not labels) from the
+test distribution, find a lower dimensional subspace $U$ (of dimension
+$d$ which is fixed beforehand) of the
+features that has high ``predictive'' utility in the \emph{test}
+distribution.  The measure of utility of $U$ we consider will be the mutual
+information between the projected features and labels for the test
+distribution, which can be calculated using projected test samples
+$\{U(x_i^B),y_i^B\}$.  The problem of course is that we do not have
+these test labels.  Past work \cite{suzuki2013sufficient} solved this
+problem without covariate shift - given $U_{\operatorname{old}}$, they
+construct a local estimator $f$ of the utility of $U$:
+$f(U;U_{\operatorname{old}}) \approx MI(U(X),Y)$ which is only
+accurate for $U$ close to $U_{\operatorname{old}}$.  They let $U_{\operatorname{old}}
+\leftarrow \operatorname{argmax}_U f(U;U_{\operatorname{old}})$ and iterate.
+
+Constructing this
+estimator $f(U;U_{\operatorname{old}})$ required solving an optimization problem whose objective
+contained an expectation over the training data.  (Just estimating the
+mutual information at $U_{\operatorname{old}}$, which
+$f(U_{\operatorname{old}};U_{\operatorname{old}})$ should equal, requires solving Equation \ref{eq:SDR_U},
+which has an expectation.  To modify their technique for when test
+labels are not available, all we need to do is to modify the
+estimator, estimating expectations over test distribution $P^B$ with
+importance weighted expectations using samples from $P^A$.  This change
+is quite minor.  Thus, for this project, I also propose to figure out
+how to make $U$ row-sparse, so the projected features only involve a
+small subset of the features.  I'm not sure how to do this, or whether
+$d$ should be fixed beforehand.  However, the actual problem of
+supervised dimension reduction under covariate shift has not been
+addressed before.
+
+
+% Certainly, a change in marginal
+% covariate distribution can affect the utility of a project, by any
+% reasonable measure.  Suppose you have 2 binary features such that the
+% label is deterministic given features, and are looking for a
+% 1-dimensional representation (deciding which feature to keep).
+% Assuming the 2 features are independent of each other, and the 
+
+\subsection{Formulation}
+We assume there are 2 unknown distributions $P_{X,Y}^A$ and
+$P_{X,Y}^B$ related via the covariate shift assumption, that
+\begin{align}
+P_{X,Y}^A(\cdot) = P_{X}^A(\cdot)P_{Y|X}(\cdot)\\
+P_{X,Y}^B(\cdot) = P_{X}^B(\cdot)P_{Y|X}(\cdot)
+\end{align}
+so that the conditional distribution $P_{Y|X}$ is identical in $P_{X,Y}^A$ and
+$P_{X,Y}^B$.
+
+We are given $N^A$ samples $\{x_i^A,y_i^A\}$ drawn iid from
+$P_{X,Y}^A$ and $N^B$ samples $\{x_i^B\}$ drawn iid from $P_X^B$.
+The goal is to perform sufficient dimension reduction under covariate
+shift - to find:
+\begin{align}
+&\hat{U} =  \operatorname{argmax}_{U(\cdot)} I_{SQ}(U(X^B),Y^B) =
+\operatorname{argmax}_{U(\cdot)} I_{\overbar{SQ}}(U(X^B),Y^B) - \tfrac{1}{2}\label{eq:SDR}
+\shortintertext{where}
+&I_{\overbar{SQ}}(U(X^B),Y^B) = \sup_{g \geq 0} E_{U(X),Y\sim
+  P_{U(X),Y}^B}[g(U(X),Y)] - E_{U(X),Y \sim
+  P_{U(X)}^BP_{Y}^B}[\tfrac{1}{2}g(U(X),Y)^2]\label{eq:SDR_U}\\
+=& \sup_{g \geq 0} - \tfrac{1}{2}E_{U(X),Y \sim
+  P_{U(X)}^AP_{Y}^A}[w_{U(X)}(U(X))w_Y(Y)g(U(X),Y)^2] + E_{U(X),Y\sim
+  P_{U(X),Y)}^A}[w_{U(X),Y}(U(X),Y)g(U(X),Y)] \label{eq:shift_ISQ}\\
+%=& \sup_{g \geq 0} E_{U(X^A),Y^A\sim
+%  P_{U(X^A),Y^A)}}[w_{U(X)}(U(X^A))g(U(X^A),Y^A)] - E_{U(X^A),Y^A \sim
+%  P_{U(X^A)}P_{Y^A}}[w_{U(X)}(U(X^A))w_Y(Y^A)\tfrac{1}{2}g(U(X^A),Y^A)^2]
+\shortintertext{where}
+&w_{U(X),Y}(x,y):= \tfrac{P_{U(X),Y}^B(x,y)}{P_{U(X),Y}^A(x,y)} =
+\tfrac{P_{U(X)}^B(x)P_{Y|U(X)}(y)}{P_{U(X)}^A(x)P_{Y|U(X)}(y)}=\tfrac{P_{U(X)}^B(x)}{P_{U(X)}^A(x)}:=w_{U(X)}(x)\label{eq:ratios}\\
+&w_Y(y) := \tfrac{P_{Y}^B(y)}{P_{Y}^A(y)}
+\end{align}
+Note that all expectations are now over
+$P_{U(X),Y}^A,P_{U(X)}^A,P_{Y}^A$, which are the distributions we
+actually have empirical distributions for.  Making use of Equation
+\ref{eq:ratios} and assuming the function class $\mathcal{G}$ of
+Equation \ref{eq:I_f_basis}, we can write down the empirical
+estimation version of Equation \ref{eq:shift_ISQ}:
+
+\begin{align}
+\hat{I}_{\overbar{SQ}}(U(X^B),Y^B)=\max_{\alpha\geq 0} &\Bigr(-\tfrac{1}{2}\alpha^T\Big(\sum_i
+w_{U(X)}(U(x_i^A))w_Y(y_i^A)\Phi(U(x_i^A),y_i^A)
+\Phi(U(x_i^A),y_i^A)^T\Big)\alpha \\
+&+ \Big(\sum_i w_{U(X)}(U(x_i^A))
+\Phi(U(x_i^A),y_i^A)\Big)^T\alpha \Bigr)
+\end{align}
+This expression requires the density ratio functions $w_{U(X)}(\cdot)$
+and $w_Y(\cdot)$. Given $U$, $w_{U(X)}(\cdot)$ can be estimated using
+samples $\{U(x_i^A)\},\{U(x_i^B)\}$ using Equation
+\ref{eq:sq_div_estimation}, where $p\leftarrow P^B_{U(X)}, q\leftarrow
+P^A_{U(X)}$.
+Estimating $w_Y(\cdot)$ requires a modification of the same technique,
+as we have samples $\{y_i^A\}$, but not $\{y_i^B\}$.  Note that the
+maximizing $g_{\overbar{SQ}}(\cdot)$ of Equation \ref{eq:sq_div_opt}
+with $p\leftarrow P^B_Y,q\leftarrow P^A_Y$ will be such that
+$g_{\overbar{SQ}}(y)=\tfrac{P^B_Y(y)}{P^A_Y(y)}=w_Y(y)$, and so we
+need to empirically estimate 
+\begin{align}
+D_{\overbar{SQ}}(P^B_Y,P^B_X) = \sup_{g \geq 0}E_{Y\sim P^A_Y}[g(Y)] -
+E_{Y\sim P^B_Y}[\tfrac{1}{2}g(Y)^2]
+\end{align}
+With samples $\{y_i^A\}$, a simple average suffices to estimate
+$E_{Y\sim P^A_Y}[g(Y)]\approx \tfrac{1}{N^A}\sum_ig(y_i^A)$, where I
+now use $\approx$ to mean ``is an unbiased estimate of''.  For the
+other term:
+\begin{align}
+E_{Y\sim P^B_Y}[\tfrac{1}{2}g(Y)^2] &= E_{X\sim P^B_{U(X)}}[E_{Y \sim
+  P^B_{Y|U(X)}}[\tfrac{1}{2}g(Y)^2]]\\
+&= E_{X\sim P^B_{U(X)}}[E_{Y \sim P^A_{Y|U(X)}}[\tfrac{1}{2}g(Y)^2]]\\
+&= E_{X\sim P^A_{U(X)}}[w_{U(X)}(X)E_{Y \sim
+  P^A_{Y|U(X)}}\tfrac{1}{2}g(Y)^2]]\\
+&= E_{X,Y\sim P^A_{U(X),Y}}[w_{U(X)}(X)\tfrac{1}{2}g(Y)^2]\\
+&\approx \tfrac{1}{N^A}\sum_i w_{U(X)}(x_i^A)\tfrac{1}{2}g(y_i^A)^2
+\end{align}
+Thus, the estimation of $D_{\overbar{SQ}}(P_Y^B,P_Y^A)$ that gives us
+an estimate of $w_Y(\cdot)$ is:
+\begin{align}
+\hat{D}_{\overbar{SQ}}&=\max_{\alpha \geq 0}
+-\tfrac{1}{2}\alpha^T\Big(\tfrac{1}{N^A}\sum_i w_{U(X)}(x_i^A)\Phi(y_i^A)\Phi(y_i^A)^T\Big)\alpha
++\Big(\tfrac{1}{N^A}\sum_i \Phi(y_i^A)\Big)^T\alpha\ \text{with}\\
+\hat{w}_Y(y) &= \hat{g}_{\overbar{SQ}}(y) = \hat{\alpha}^T\Phi(y) \label{eq:w_y}
+\end{align}
+In summary, the grand optimization objective of Equation \ref{eq:SDR}
+is over $U$, but the objective function itself is another optimization
+problem that depends on $U$.  This suggests initializing $U$ and repeating the following
+procedure until convergence:
+\begin{itemize}
+\item Update $w_{U(X)}(\cdot)$ based on $U$ (Equation \ref{eq:sq_div_opt})
+\item Update $w_{Y}(\cdot)$ based on $w_{U(X)}(\cdot)$ (Equation
+  \ref{eq:SDR})
+\item Update $U$, viewing $\hat{I}_{\overbar{SQ}}(U(X^B),Y^B)$ a
+  function of $U$, with $\alpha,W_{U(X)},W_Y$ fixed.
+\end{itemize}
+
+\pagebreak
+\subsection{Generic Formulation Based on Predictive Loss}
+Note:  I will use $U$ to denote the subspace spanned by rows of
+$U\in\mathbb{R}^{D \times P}$, and also use $U(\cdot)$ as a function
+from $\mathbb{R}^P\rightarrow\mathbb{R}^D$ that projects data to the
+subspace.\\
+
+\noindent Input: 
+\begin{itemize}
+\item subspace dimension $D$
+\item function class $\mathcal{F}$ consisting
+of functions $f:\mathbb{R}^D \rightarrow \mathbb{R}$
+\item training
+covariates and labels $\{x_i^A,y_i^A\}$ drawn from $P^A_{X,Y}$
+\item test
+covariates $\{x_i^B\}$ drawn from $P^B_X$,
+with $x_i^A,x_i^B\in \mathbb{R}^P$
+\item prediction loss function
+$L(\cdot,\cdot)$
+\item black box weight ratio function parameterized by $U$ that uses
+  training/test covariate samples $\{x_i^A\},\{x_i^B\}$:
+$w(\cdot;U):=\mathbb{R}^P\rightarrow \mathbb{R}: x\mapsto
+\tfrac{P^B_{U(X)}(U(x))}{P^A_{U(X)}(U(x))}$
+\end{itemize}
+Output: subspace $U$ = $\operatorname{argmax}_{U} \min_{f \in
+  \mathcal{F}}\sum_i w(x_i^A)L(f(x_i^A),y_i^A)$.  $U$ is the most
+useful subspace for prediction, the subspace within which if all
+covariates were projected, achievable loss is the lowest.\\
+
+\noindent Iterative algorithm:
+\begin{enumerate}
+\item$w_{\operatorname{current}}(\cdot) \leftarrow w(\cdot;
+U_{\operatorname{current}})$
+\item $U_{\operatorname{current}} \leftarrow \operatorname{argmax}_{U} \min_{f \in
+  \mathcal{F}}\sum_i w_{\operatorname{current}}(x_i^A)L(f(U(x_i^A)),y_i^A)$
+\end{enumerate}
+Problem: suppose $\mathcal{F}$ is the set of linear functions.  Then
+there are many $U$ in the $\operatorname{argmax}$ - those that the
+optimal regression coefficient $B^*\in \mathbb{R}^P$ (in the original
+feature space) lies within.  In other words, the
+$\operatorname{argmax}$ is any $U$ contained in a $P-1$ dimensional subspace.
+
+%  Given $U$, we can use any
+% density ratio estimation method to calculate $w_{U(X)}(\cdot)$ as we
+% have samples $\{U(x_i^A\},\{U(x_i^B)\}$.  
+
+
+
+
+% We are interested in whether $U$ is ``sufficient'' to achieve low
+% \emph{test} loss and not low training loss, because 
+
+% The reason $U$ should be a subspace that is ``sufficient'' for good
+% predictions in the test distribution is that .  Certainly, a
+% ``sufficient'' subspace for the test and training distributions
+% differ.  Consider for example
+
+%2 things: care about test performance.  not unsupervised.
+
+% I propose to combine the dimension reduction approach of Section
+% \ref{sec:dim_reduction} and the joint approach of Section
+% \ref{sec:joint}; I will estimate the ratio of the test and training densities
+% \emph{projected} into a lower dimensional subspace $U$, such that
+% knowing the projejction of the input features into $U$ is
+% \emph{sufficient} for learning some predictor that achieves low expected loss on the test set.
+
+% if we actually had labels, a 2 step procedure would suffice
+
+% A lower dimensional subspace $U$ of $X$ will be found
+% such that:
+% \begin{enumerate}
+% \item 
+% \end{enumerate}
+
+
+
+% For example,
+% suppose 
+% \begin{align}
+% E_{Y|X=x}[L_f(f(x),Y)]&=E_{Y|\operatorname{Proj}(X)=\operatorname{Proj}
+%   (x)}[L_f(f(\operatorname{Proj}(x)),Y)]
+% \shortintertext{for all $x$.  Then,}
+% E_{X,Y\sim P^A_{X,Y}(\cdot)}[L_f(f(X),Y)] &= E_{X\sim
+%   P^A_{X}(\cdot)}[E_{Y|X}[L_f(f(X),Y)]] \\
+% &= E_{\operatorname{Proj} (X)\sim
+%   P^A_{U}(\cdot)}[E_{Y|\operatorname{Proj}
+%   (X)}[L_f(f(\operatorname{Proj} (X)),Y)]]\\
+% &= E_{U(X)\sim P_{U(X)}^A}[\frac{P_{U(X)}^B(U(X))}{P_{U(X)}^A(U(X))}E_{Y|U
+%   (X)}[L_f(f(U (X)),Y)]]
+% \end{align}
+
+% For me, I am not sure this particular joint formulation makes sense.
+% For example, suppose someone told you the ``true'' $f(\cdot)$, say,
+% the maximizing $f(\cdot)$ in Equation \ref{eq:joint_bickel}, and now
+% you want to estimate $w(\cdot)$.  Why should knowledge of the loss on
+% each training sample under $f(\cdot)$ guide the estimation of
+% $w(\cdot)$?  
+%Certainly, this is what is happening:
+% For example, we could rewrite Equation \ref{eq:joint_bickel} as 
+% \begin{align}
+% &\operatorname{argmin}_{w(\cdot)}
+% L_w(w(\cdot);\{x_i^A\},\{x_i^B\}) + R(w(\cdot)),\ \ \text{where}\\
+% &R(w(\cdot))=\min_{f(\cdot)}\sum_iw(x_i^A)
+% L_f(f(x_i^A),y_i^A) \label{eq:joint_bickel_reg},
+% \end{align}
+% and so we view the joint formulation as doing estimating the ratio
+% function $w(\cdot)$, but with a regularizer $R(w(\cdot))$ that
+% penalizes the (minimum over possible predictive functions $f(\cdot)$)
+% dot product correlation between the vector of weights, and vector of
+% losses.  For example, if some $(x_i^A,y_i^A)$ is say an outlier and
+% cannot be predicted well by any $f(\cdot)$, then $w(x_i^A)$ would
+% encouraged to be low.  Alternatively, we could view Equation
+% \ref{eq:joint_bickel} as trying to learn $f(\cdot)$, where we can
+% ``cheat''  by choosing to downweight the loss of samples we can't
+% predict well.  Neither really makes sense to me.
+
+% \section{Supervised Dimension Reduction for Ratio Estimation}
+% Dimension reduction was done in the formulation of Equation
+% \ref{eq:pearson_div}, with the motivation that ratio estimation is
+% more easily done in low dimensions.  However, we believe the subspace $U$ within
+% which the ratio function is estimated should only contain directions
+% along which the predictive function $f(\cdot)$ does change - no more,
+% no less.  In fact, letting $U$ contain too \emph{many} features could
+% be bad - suppose training and test data have the same distribution of
+% age, and the same gender ratio for every age, except for the
+% 50 year olds, in which the test set has almost all males, and
+% the training set has almost all females.  Then,
+% the weight ratio in the training data for 50 year olds will be high,
+% and that for 50 year old females will be low.  Now suppose $f(\cdot)$
+% did not depend on gender.  We could have computed the weight ratios
+% without considering gender - the bias of the estimated test loss should not change
+% in expectation, but the variance would decrease, as now the estimated
+% weights vary less.
+
+% \subsection{Standalone or Joint Approach?}
+% Now, the 2 tasks are:
+% \begin{enumerate}
+% \setlength\itemsep{0em}
+% \item Find a subspace $U$ maximizing some notion of dependency between
+%   $U,Y$ in the joint distribution $P_{U,Y}^B(\cdot)$.  Note that this
+%   is dependence in the test distribution (which we'd have to estimate
+%   using weight ratios as we do not have labels in the test).
+%   Possibilities include:
+%   \begin{itemize}
+% \setlength\itemsep{0em}
+% \item $\operatorname{MI}(U,Y)$ of $P_{U,Y}^B(\cdot)$.  This will require $w(\cdot)$,
+%   since we don't have the labels for the test data.  We also care
+%   about $P_{U,Y}^B(\cdot)$ instead of $P_{U,Y}^A(\cdot)$ because we
+%   want high predictive information in $U$ for the test data.
+% \item $\operatorname{argmin}_{f(\cdot)} \sum_i w(x_i^A)
+%   L_f(f(\operatorname{proj}_U(x_i^A)),y_i^a)$ where $w(\cdot)$ is a
+%   yet un-estimated weight ratio function.
+%     \end{itemize}
+% \item Estimate $w(x) = \frac{P_U^B(\operatorname{proj}_U(x))}{P_U^A(\operatorname{proj}_U(x))}$.
+% \end{enumerate}
+% Note that both steps depend on each other - Step 1 requires $w(\cdot)$
+% to get $U$, and Step 2 requires $U$ to get $w(\cdot)$.  The question
+% is whether this joint dependency is good.
+
+
+\pagebreak
+\bibliographystyle{plain}
+\bibliography{bib1.bib}
+
+\end{document}

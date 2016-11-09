@@ -1,0 +1,33 @@
+\begin{thebibliography}{1}
+
+\bibitem{bickel2007discriminative}
+Steffen Bickel, Michael Br{\"u}ckner, and Tobias Scheffer.
+\newblock Discriminative learning for differing training and test
+  distributions.
+\newblock In {\em Proceedings of the 24th international conference on Machine
+  learning}, pages 81--88. ACM, 2007.
+
+\bibitem{huang2006correcting}
+Jiayuan Huang, Arthur Gretton, Karsten~M Borgwardt, Bernhard Sch{\"o}lkopf, and
+  Alex~J Smola.
+\newblock Correcting sample selection bias by unlabeled data.
+\newblock In {\em Advances in neural information processing systems}, pages
+  601--608, 2006.
+
+\bibitem{kanamori2010density}
+Takafumi Kanamori.
+\newblock Density ratio estimation: A comprehensive review.
+\newblock {\em 数理解析研究所講究録}, 1703:10--31, 2010.
+
+\bibitem{nguyen2007estimating}
+XuanLong Nguyen, Martin~J Wainwright, and Michael~I Jordan.
+\newblock Estimating divergence functionals and the likelihood ratio by
+  penalized convex risk minimization.
+
+\bibitem{suzuki2013sufficient}
+Taiji Suzuki and Masashi Sugiyama.
+\newblock Sufficient dimension reduction via squared-loss mutual information
+  estimation.
+\newblock {\em Neural computation}, 25(3):725--758, 2013.
+
+\end{thebibliography}

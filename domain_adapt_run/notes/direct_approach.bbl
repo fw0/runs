@@ -1,0 +1,28 @@
+\begin{thebibliography}{1}
+
+\bibitem{bengio2000gradient}
+Yoshua Bengio.
+\newblock Gradient-based optimization of hyperparameters.
+\newblock {\em Neural computation}, 12(8):1889--1900, 2000.
+
+\bibitem{bickel2007discriminative}
+Steffen Bickel, Michael Br{\"u}ckner, and Tobias Scheffer.
+\newblock Discriminative learning for differing training and test
+  distributions.
+\newblock In {\em Proceedings of the 24th international conference on Machine
+  learning}, pages 81--88. ACM, 2007.
+
+\bibitem{edelman1998geometry}
+Alan Edelman, Tom{\'a}s~A Arias, and Steven~T Smith.
+\newblock The geometry of algorithms with orthogonality constraints.
+\newblock {\em SIAM journal on Matrix Analysis and Applications},
+  20(2):303--353, 1998.
+
+\bibitem{shimodaira2000improving}
+Hidetoshi Shimodaira.
+\newblock Improving predictive inference under covariate shift by weighting the
+  log-likelihood function.
+\newblock {\em Journal of statistical planning and inference}, 90(2):227--244,
+  2000.
+
+\end{thebibliography}

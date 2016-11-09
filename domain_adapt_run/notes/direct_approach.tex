@@ -1,0 +1,76 @@
+\documentclass[8pt]{article}
+\usepackage[letterpaper, margin=0.66in]{geometry}
+\hyphenation{op-tical net-works semi-conduc-tor}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{breqn}
+\usepackage{mathtools}
+\usepackage[numbers]{natbib}
+\usepackage{subcaption}
+\usepackage{bbm}
+\usepackage{stmaryrd}
+\newcommand{\tab}{\hspace*{2em}}
+\newcommand{\ignore}[1]{}
+\newcommand{\overbar}[1]{\mkern 1.0mu\overline{\mkern-1.0mu#1\mkern-1.0mu}\mkern 1.0mu}
+\newcommand\independent{\protect\mathpalette{\protect\independenT}{\perp}}
+\def\independenT#1#2{\mathrel{\rlap{$#1#2$}\mkern2mu{#1#2}}}
+\begin{document}
+\section{Overview}
+% This document describes the approach to domain adaptation that finds a projection of the train/test features such that
+% \begin{enumerate}
+% \item The projected features are still useful for prediction
+% \item The predictive functions trained on the projected training data and an ``inferred'' test data (replete with labels, that ends up being constructed from the subset of training data whose features ``look like'' they came from the test data) are \emph{similar}.
+% \end{enumerate}
+
+% A learning algorithm $A$ is a function from labelled data samples $\{X_i,Y_i\}\sim P_{XY}$ to predictive function $f\mapsfrom A(\{X_i,Y_i\})$.  The objective is designing $A$ is such that $A(\{X_i,Y_i\}) = \operatorname{argmin}_f E_{P_{XY}}[L(f(X),Y)]$.  Let us heuristically rephrase this objective: given samples $\{X_i^A,Y_i^A\}\sim P^A_{XY}$ giving \emph{empirical} distribution $\bar{P}^A_{XY}$, and likewise samples $\{X_i^B,Y_i^B\}\sim P^B_{XY}$, we want $A$ to be such that $E_{\bar{P}^A_{XY}}[f^A(X),Y] + E_{\bar{P}^B_{XY}}[f^B(X),Y] + D(f^A,f^B)$ is low, where $f^A = A(\{X^A_i,Y^A_i\})$ and $f^B = A(\{X^B_i,Y^B_i\})$.  That is, we want the \emph{in-sample} loss from training using $A$ on training and test set to be low, while the 2 learned predictive functions $f^A$ and $f^B$ are still similar.  These 2 objectives seem equivalent when $P^A_{X,Y}=P^B_{X,Y}$, and in this case we can be confident $A$ will do well in terms of them.  If $P^A_{X,Y}\neq P^B_{X,Y}$, then these 2 objectives would not be the same.  Let's suppose we've decided on a particular learning algorithm $A$, which performs well in terms of the first objective, for both $P^A_{X,Y},P^B_{X,Y}$.  The question is then, can we preprocess our data such that with $A$, the second objective is achieved?
+\subsection{Domain Adaptation Problem}
+The generic learning problem is: Devise a learning algorithm $\mathcal{A}$ such that given an empirical distribution  $\bar{P}^A_{X,Y}$ drawn iid from true distribution $P^A_{X,Y}$, $\mathcal{A}$ has the ``generalizes well'' property: 
+\begin{flalign} 
+&&&\mathcal{A}(\bar{P}^A_{X,Y}) \mapsto f(\cdot)\ \text{such that}\ f(\cdot) = \operatorname{argmin}_{f\in\mathcal{F}}E_{X,Y\sim P^B_{X,Y}}[L(f(X),Y)]&\ \text{(generalizes well)}\label{eq:generalizes_well}&
+\end{flalign}
+for some loss function $L(\cdot,\cdot)$, function class $\mathcal{F}$, and distribution $P^B_{X,Y}$.
+In the typical ``stationary'' learning scenario, $P^A_{X,Y}=P^B_{X,Y}$.  In the \emph{domain adaptation} scenario, this equality does not hold.  Instead, $P^B_{X,Y}=P^B_XP^A_{Y|X}$, for $P^B_X\neq P^A_X$.  In return for this inconvenience, we are also given empirical distribution $\bar{P}^B_X$.  We also assume we are armed with some algorithm $\mathcal{A}$ that is assumed to perform well in the ``stationary'' learning scenario where $P^A_{X,Y}=P^B_{X,Y}$. 
+
+\subsection{Projection-based Methods}
+These methods reduce the domain adaptation scenario to the stationary scenario by finding a transformation $\phi(\cdot)$ such that $P^A_{\phi(X),Y}=P^B_{\phi(X),Y}$.  Then, $E_{X,Y\sim P^B_{\phi(X),Y}}[L(f(\phi(X)),Y)]$ should be low, where $f=\mathcal{A}(\hat{P}^A_{\phi(X),Y})$, due to our assumptions on $\mathcal{A}$ generalizing well in the stationary scenario.  For $P^A_{\phi(X),Y}=P^B_{\phi(X),Y}$ to hold, it is \emph{sufficient} $\phi$ satisfies:
+\begin{flalign}
+&&&P^A_{\phi(X)} = P^B_{\phi(X)} &\text{(feature distribution similarity)}\label{eq:feature_similarity}&\\
+&&&Y\independent X | \phi(X)\ \ \text{where}\ \ (X,Y) \sim P^A_{X,Y} &\text{(sufficient subspace)}&\label{eq:sufficient_subspace}
+\end{flalign}
+Most methods only check that $\phi$ satisfies Condition \ref{eq:feature_similarity}.  Few methods actually check for Condition \ref{eq:sufficient_subspace}, which says that the projected space is (all that is) useful for predicting $Y$.  Note that given a $\phi$ one can only \emph{estimate} whether these conditions hold given the available $\bar{P}^A_{X,Y},\bar{P}^B_X$.
+
+Instead of finding $\phi$ to take us to the stationary scenario so that $\mathcal{A}$ generalizes well, why not directly find $\phi$ such that $\mathcal{A}$ generalizes well?  Firstly, we do not necessarily need stationarity for good generalization, so that enforcing it is perhaps an unnecessary constraint.  Secondly, to achieve stationarity, one needs to choose between methods for finding subspaces satisfying the 2 conditions, checking whether assumptions of those methods hold, and probably end up having to choose a trade-off parameter balancing the 2 conditions.  Thirdly, such methods are not tailored to any specific downstream predictive method.  We can bypass all these issues with a direct approach.%Even if performance of this proposed method is the same as previous ones, it is more applicable due to not having less assumptions, and hyperparameters, and being more ``canonical''.
+
+\subsection{Contribution of This Work}
+We propose a novel, direct formulation to handle the domain adaptation problem, jointly learning a projection and predictive function by performing empirical risk minimization that relies on an unbiased estimate of in-sample test loss.
+%We show scenarios where it outperforms existing methods on simulated and real data, highlighting its easy applicability.
+
+\section{Formulation}
+\subsection{Assumptions}
+This work takes place in the domain adaptation scenario: Given $N^A$ samples $(x_i^A,y_i^A) \sim \bar{P}^A_{X,Y},$ $N^B$ samples $x_i^B \sim \bar{P}^B_{X},$ with $x_i^A,x_i^B \in \mathbb{R}^M$ and $y_i^A \in \mathcal{Y}$, the label space, our goal is to jointly find a feature projection $\phi(\cdot)$ and predictive function $f$ minimizing expected loss under loss function $L$ and test distribution $P^B_{X,Y}$: $E_{X,Y\sim P^B_{X,Y}}[L(f(\phi(X)),Y]$.  We will assume $\phi$ is a linear projection from $\mathbb{R}^M$ to $\mathbb{R}^K$ for given $K<M$, so that $\phi(x)=M^Tx$ where $M\in S(N,K)$, the set of Stiefel manifolds, which consist of the $N\times K$ matrices with orthonormal columns.  Thus, $f$ has domain $\mathbb{R}^K$.  We also assume $f$ to be linear, parameterized by $\theta \in \mathbb{R}^K$ so that we may write $f(\cdot;\theta)$.
+
+\subsection{Optimization Problem}
+Given the above assumptions, the optimization problem we solve is as follows:
+\begin{flalign}
+&&\min_{\substack{M\in S(N,K)\\\theta \in \mathbb{R}^K\\ \hat{\beta}\in \mathbb{R}^K}}& \underbrace{\sum_i w(u_i^A) L(f(u_i^A;\theta),y_i^A)}_{\text{estimate of in-sample loss under} P^B_{\phi(X),Y}} + \underbrace{R(\theta)}_{\text{regularization}}&(\text{empirical risk minimization})&
+\shortintertext{where}
+&&u_i^A &= M^Tx_i^A,\ 
+u_i^B = M^Tx_i^B&(\text{defining projected features})&\\
+&&f(u_i^A;\theta) &= g(\theta^Tu_i^A)&(\text{defining predictive outputs})&\\
+&&\hat{\beta} &= \operatorname{argmin}_{{\beta}} \ \ \sum_{\mathclap{\substack{u_i,z_i \in \{u_i^A,1\} \cup \{u_i^B,0\}}}}\ L^{\operatorname{logistic}}(\operatorname{logistic}({\beta}^Tu_i),z_i) \label{eq:logreg}&(\text{running logistic regression})&\\
+&&w(u_i^A) &= \tfrac{N^A}{N^B} \operatorname{logistic}(\hat{\beta}^Tu_i^A) \label{eq:weight}&\text{(obtaining weights)}&
+\end{flalign}
+Thus, given $X$, $M$ defines projected random variable $U=M^TX$.  $\mathcal{A}$ assumes $f(\cdot)$ to be a (generalized) linear function parameterized by $\theta$ (and fixed link function $g(\cdot)$).  $\mathcal{A}$, given empirical \emph{projected} distribution $\bar{P}^A_{U,Y}$, learns $f(\cdot)$ by attempting to minimize in-sample loss under $P^B_{U,Y}$ plus a regularization term $R(\theta)$.  However, as we do not have $\bar{P}^B_{U,Y}$, we estimate that in-sample loss with $\sum_i w(u_i^A) L(f(u_i^A;\theta),y_i^A)$.  This estimate is unbiased if $w(u) = \tfrac{P^B_U(u)}{P^A_U(u)}$\cite{shimodaira2000improving}.  We obtain these weights in a 2 step subproblem, following the approach of \cite{bickel2007discriminative}: we first learn a logistic regression classifier (Equation \ref{eq:logreg}) that differentiates between $u_i^B \sim \bar{P}^B_U$ (labelled 1)  and $u_i^A \sim \bar{P}^A_U$ (labelled 0).  Having learned the classifier, the weight estimates are given by Equation \ref{eq:weight}.
+
+\subsection{Solving the Optimization Problem}
+We solve the optimization problem via gradient descent, as there are non-linearities in both the constraints and objective function.  Thus the optimization is straightforward, aside from two issues.
+The first issue is that as $M\in S(N,K)$, naive gradient steps for $M$ will result in $M$ no longer satisfying the Stiefel manifold constraints.  Thus we will need to use manifold optimization methods \cite{edelman1998geometry}.
+The second issue is that $\hat{B}$ depends on $\vec{u}:=\{u_i^A\} \cup \{u_i^B\}$ not through a specified functional relation, but as the solution to a (convex logistic regression) optimization problem parameterized by $\vec{u}$ (see Equation \ref{eq:logreg}).  Thus to calculate $\tfrac{d\hat{B}}{d\vec{u}}$ we will have to use implicit differentiation based on the first order optimality relation satisfied between $\hat{B}$ and $\vec{u}$, as described in \cite{bengio2000gradient}.
+
+\bibliographystyle{plain}
+\bibliography{bib1.bib}
+
+\end{document}
